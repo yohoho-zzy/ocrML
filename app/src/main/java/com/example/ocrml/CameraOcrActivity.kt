@@ -3,11 +3,13 @@ package com.example.ocrml
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
+import android.graphics.Rect
 import android.os.Bundle
 import android.util.Size
 import android.util.SparseIntArray
 import android.view.Surface
 import android.view.TextureView
+import android.view.View
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -24,6 +26,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
 
     private lateinit var textureView: TextureView
     private lateinit var textView: TextView
+    private lateinit var overlay: View
 
     private lateinit var cameraDevice: CameraDevice
     private lateinit var captureSession: CameraCaptureSession
@@ -47,6 +50,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         setContentView(R.layout.activity_camera_ocr)
         textureView = findViewById(R.id.preview)
         textView = findViewById(R.id.result)
+        overlay = findViewById(R.id.ocr_area)
 
         val handlerThread = HandlerThread("CameraBackground")
         handlerThread.start()
@@ -129,6 +133,17 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         val image = reader.acquireLatestImage() ?: return
         val rotation = orientations[windowManager.defaultDisplay.rotation]
         val input = InputImage.fromMediaImage(image, rotation)
+        val viewWidth = textureView.width
+        val viewHeight = textureView.height
+        val scaleX = image.width.toFloat() / viewWidth
+        val scaleY = image.height.toFloat() / viewHeight
+        val rect = Rect(
+            (overlay.left * scaleX).toInt(),
+            (overlay.top * scaleY).toInt(),
+            (overlay.right * scaleX).toInt(),
+            (overlay.bottom * scaleY).toInt()
+        )
+        input.setCropRect(rect)
         recognizer.process(input)
             .addOnSuccessListener { textView.text = it.text }
             .addOnFailureListener { }
