@@ -81,9 +81,9 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     }
 
     private fun createSession(size: Size) {
-        val surface = Surface(textureView.surfaceTexture.apply {
-            setDefaultBufferSize(size.width, size.height)
-        })
+        val surfaceTexture = textureView.surfaceTexture ?: return
+        surfaceTexture.setDefaultBufferSize(size.width, size.height)
+        val surface = Surface(surfaceTexture)
 
         previewRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
         previewRequestBuilder.addTarget(surface)
