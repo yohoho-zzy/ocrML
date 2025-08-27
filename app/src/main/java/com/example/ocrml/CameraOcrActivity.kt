@@ -132,7 +132,6 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     override fun onImageAvailable(reader: ImageReader) {
         val image = reader.acquireLatestImage() ?: return
         val rotation = orientations[windowManager.defaultDisplay.rotation]
-        val input = InputImage.fromMediaImage(image, rotation)
         val viewWidth = textureView.width
         val viewHeight = textureView.height
         val scaleX = image.width.toFloat() / viewWidth
@@ -143,7 +142,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
             (overlay.right * scaleX).toInt(),
             (overlay.bottom * scaleY).toInt()
         )
-        input.setCropRect(rect)
+        val input = InputImage.fromMediaImage(image, rotation, rect)
         recognizer.process(input)
             .addOnSuccessListener { textView.text = it.text }
             .addOnFailureListener { }
