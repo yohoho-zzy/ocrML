@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.graphics.ImageFormat
 import android.os.Bundle
 import android.util.Size
+import android.util.SparseIntArray
 import android.view.Surface
 import android.view.TextureView
 import android.widget.TextView
@@ -17,7 +18,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
 
 class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListener {
 
@@ -30,7 +31,16 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     private lateinit var previewRequestBuilder: CaptureRequest.Builder
     private lateinit var backgroundHandler: Handler
 
-    private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    private val orientations = SparseIntArray().apply {
+        append(Surface.ROTATION_0, 0)
+        append(Surface.ROTATION_90, 90)
+        append(Surface.ROTATION_180, 180)
+        append(Surface.ROTATION_270, 270)
+    }
+
+    // Use ML Kit's Japanese text recognizer
+    private val recognizer =
+        TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -117,7 +127,8 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
 
     override fun onImageAvailable(reader: ImageReader) {
         val image = reader.acquireLatestImage() ?: return
-        val input = InputImage.fromMediaImage(image, 0)
+        val rotation = orientations[windowManager.defaultDisplay.rotation]
+        val input = InputImage.fromMediaImage(image, rotation)
         recognizer.process(input)
             .addOnSuccessListener { textView.text = it.text }
             .addOnFailureListener { }
