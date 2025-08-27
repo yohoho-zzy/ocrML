@@ -53,6 +53,21 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
                 PackageManager.PERMISSION_GRANTED
 
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 0 && grantResults.isNotEmpty() &&
+            grantResults[0] == PackageManager.PERMISSION_GRANTED
+        ) {
+            textureView.post { openCamera() }
+        } else {
+            finish()
+        }
+    }
+
     private fun openCamera() {
         val manager = getSystemService(CameraManager::class.java)
         val cameraId = manager.cameraIdList.first()
