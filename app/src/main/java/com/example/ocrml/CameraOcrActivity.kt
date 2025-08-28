@@ -3,14 +3,10 @@ package com.example.ocrml
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.Rect
-import android.graphics.YuvImage
-import android.graphics.Matrix
 import android.os.Bundle
 import android.util.Size
-import android.util.SparseIntArray
 import android.view.Surface
 import android.view.TextureView
 import android.widget.TextView
@@ -25,7 +21,6 @@ import android.os.HandlerThread
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
-import java.io.ByteArrayOutputStream
 
 class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListener {
 
@@ -38,13 +33,6 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     private lateinit var imageReader: ImageReader
     private lateinit var previewRequestBuilder: CaptureRequest.Builder
     private lateinit var backgroundHandler: Handler
-
-    private val orientations = SparseIntArray().apply {
-        append(Surface.ROTATION_0, 0)
-        append(Surface.ROTATION_90, 90)
-        append(Surface.ROTATION_180, 180)
-        append(Surface.ROTATION_270, 270)
-    }
 
     // Use ML Kit's Japanese text recognizer
     private val recognizer =
@@ -136,45 +124,15 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
 
     override fun onImageAvailable(reader: ImageReader) {
         val image = reader.acquireLatestImage() ?: return
-        val rotation = orientations[windowManager.defaultDisplay.rotation]
-        val bitmap = image.toBitmap()
-        val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
-        val rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-        val viewWidth = textureView.width
-        val viewHeight = textureView.height
-        val scaleX = rotatedBitmap.width.toFloat() / viewWidth
-        val scaleY = rotatedBitmap.height.toFloat() / viewHeight
+        image.close()
+
+        val bitmap = textureView.bitmap ?: return
         val box = overlay.getBoxRect()
-        val rect = Rect(
-            (box.left * scaleX).toInt(),
-            (box.top * scaleY).toInt(),
-            (box.right * scaleX).toInt(),
-            (box.bottom * scaleY).toInt()
-        )
-        val cropped = Bitmap.createBitmap(rotatedBitmap, rect.left, rect.top, rect.width(), rect.height())
+        val cropped = Bitmap.createBitmap(bitmap, box.left, box.top, box.width(), box.height())
         val input = InputImage.fromBitmap(cropped, 0)
         recognizer.process(input)
             .addOnSuccessListener { textView.text = it.text }
             .addOnFailureListener { }
-        image.close()
-    }
-
-    private fun Image.toBitmap(): Bitmap {
-        val yBuffer = planes[0].buffer
-        val uBuffer = planes[1].buffer
-        val vBuffer = planes[2].buffer
-        val ySize = yBuffer.remaining()
-        val uSize = uBuffer.remaining()
-        val vSize = vBuffer.remaining()
-        val nv21 = ByteArray(ySize + uSize + vSize)
-        yBuffer.get(nv21, 0, ySize)
-        vBuffer.get(nv21, ySize, vSize)
-        uBuffer.get(nv21, ySize + vSize, uSize)
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
-        val out = ByteArrayOutputStream()
-        yuvImage.compressToJpeg(Rect(0, 0, width, height), 100, out)
-        val bytes = out.toByteArray()
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
     }
 
     override fun onDestroy() {
