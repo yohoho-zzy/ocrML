@@ -28,10 +28,10 @@ class OverlayView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        val boxWidth = 250f * resources.displayMetrics.density
-        val boxHeight = 150f * resources.displayMetrics.density
-        val expansion = 20f * resources.displayMetrics.density
-        val offsetY = 80f * resources.displayMetrics.density
+        val boxWidth = 300f * resources.displayMetrics.density
+        val boxHeight = 180f * resources.displayMetrics.density
+        val expansion = 30f * resources.displayMetrics.density
+        val offsetY = 120f * resources.displayMetrics.density
         val left = ((w - boxWidth) / 2f - expansion / 2f).toInt()
         val top = (((h - boxHeight) / 2f) - offsetY - expansion / 2f)
             .toInt().coerceAtLeast(0)
