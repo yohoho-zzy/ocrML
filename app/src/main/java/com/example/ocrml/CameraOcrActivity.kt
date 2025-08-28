@@ -34,6 +34,10 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     private lateinit var previewRequestBuilder: CaptureRequest.Builder
     private lateinit var backgroundHandler: Handler
 
+    // Flag to avoid queuing multiple recognition tasks which causes delays
+    @Volatile
+    private var isProcessing = false
+
     // Use ML Kit's Japanese text recognizer
     private val recognizer =
         TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
@@ -126,13 +130,19 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         val image = reader.acquireLatestImage() ?: return
         image.close()
 
+        // Skip this frame if a recognition task is already running
+        if (isProcessing) return
+
         val bitmap = textureView.bitmap ?: return
         val box = overlay.getBoxRect()
         val cropped = Bitmap.createBitmap(bitmap, box.left, box.top, box.width(), box.height())
         val input = InputImage.fromBitmap(cropped, 0)
+
+        isProcessing = true
         recognizer.process(input)
             .addOnSuccessListener { textView.text = it.text }
             .addOnFailureListener { }
+            .addOnCompleteListener { isProcessing = false }
     }
 
     override fun onDestroy() {
