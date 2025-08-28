@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
+import android.graphics.Matrix
 import android.os.Bundle
 import android.util.Size
 import android.util.SparseIntArray
@@ -137,10 +138,12 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         val image = reader.acquireLatestImage() ?: return
         val rotation = orientations[windowManager.defaultDisplay.rotation]
         val bitmap = image.toBitmap()
+        val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
+        val rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         val viewWidth = textureView.width
         val viewHeight = textureView.height
-        val scaleX = bitmap.width.toFloat() / viewWidth
-        val scaleY = bitmap.height.toFloat() / viewHeight
+        val scaleX = rotatedBitmap.width.toFloat() / viewWidth
+        val scaleY = rotatedBitmap.height.toFloat() / viewHeight
         val box = overlay.getBoxRect()
         val rect = Rect(
             (box.left * scaleX).toInt(),
@@ -148,8 +151,8 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
             (box.right * scaleX).toInt(),
             (box.bottom * scaleY).toInt()
         )
-        val cropped = Bitmap.createBitmap(bitmap, rect.left, rect.top, rect.width(), rect.height())
-        val input = InputImage.fromBitmap(cropped, rotation)
+        val cropped = Bitmap.createBitmap(rotatedBitmap, rect.left, rect.top, rect.width(), rect.height())
+        val input = InputImage.fromBitmap(cropped, 0)
         recognizer.process(input)
             .addOnSuccessListener { textView.text = it.text }
             .addOnFailureListener { }

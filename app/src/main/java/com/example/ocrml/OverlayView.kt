@@ -29,8 +29,9 @@ class OverlayView @JvmOverloads constructor(
         super.onSizeChanged(w, h, oldw, oldh)
         val boxWidth = 250f * resources.displayMetrics.density
         val boxHeight = 150f * resources.displayMetrics.density
+        val offsetY = 80f * resources.displayMetrics.density
         val left = ((w - boxWidth) / 2f).toInt()
-        val top = ((h - boxHeight) / 2f).toInt()
+        val top = (((h - boxHeight) / 2f) - offsetY).toInt().coerceAtLeast(0)
         val right = (left + boxWidth).toInt()
         val bottom = (top + boxHeight).toInt()
         boxRect.set(left, top, right, bottom)
