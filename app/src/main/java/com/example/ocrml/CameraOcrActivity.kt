@@ -2,8 +2,11 @@ package com.example.ocrml
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.Rect
+import android.graphics.YuvImage
 import android.os.Bundle
 import android.util.Size
 import android.util.SparseIntArray
@@ -14,12 +17,14 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import android.hardware.camera2.*
+import android.media.Image
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
+import java.io.ByteArrayOutputStream
 
 class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListener {
 
@@ -131,10 +136,11 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     override fun onImageAvailable(reader: ImageReader) {
         val image = reader.acquireLatestImage() ?: return
         val rotation = orientations[windowManager.defaultDisplay.rotation]
+        val bitmap = image.toBitmap()
         val viewWidth = textureView.width
         val viewHeight = textureView.height
-        val scaleX = image.width.toFloat() / viewWidth
-        val scaleY = image.height.toFloat() / viewHeight
+        val scaleX = bitmap.width.toFloat() / viewWidth
+        val scaleY = bitmap.height.toFloat() / viewHeight
         val box = overlay.getBoxRect()
         val rect = Rect(
             (box.left * scaleX).toInt(),
@@ -142,12 +148,30 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
             (box.right * scaleX).toInt(),
             (box.bottom * scaleY).toInt()
         )
-        val input = InputImage.fromMediaImage(image, rotation)
-        input.cropRect = rect
+        val cropped = Bitmap.createBitmap(bitmap, rect.left, rect.top, rect.width(), rect.height())
+        val input = InputImage.fromBitmap(cropped, rotation)
         recognizer.process(input)
             .addOnSuccessListener { textView.text = it.text }
             .addOnFailureListener { }
         image.close()
+    }
+
+    private fun Image.toBitmap(): Bitmap {
+        val yBuffer = planes[0].buffer
+        val uBuffer = planes[1].buffer
+        val vBuffer = planes[2].buffer
+        val ySize = yBuffer.remaining()
+        val uSize = uBuffer.remaining()
+        val vSize = vBuffer.remaining()
+        val nv21 = ByteArray(ySize + uSize + vSize)
+        yBuffer.get(nv21, 0, ySize)
+        vBuffer.get(nv21, ySize, vSize)
+        uBuffer.get(nv21, ySize + vSize, uSize)
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
+        val out = ByteArrayOutputStream()
+        yuvImage.compressToJpeg(Rect(0, 0, width, height), 100, out)
+        val bytes = out.toByteArray()
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
     }
 
     override fun onDestroy() {
