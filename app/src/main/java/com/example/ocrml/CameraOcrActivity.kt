@@ -58,9 +58,11 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         overlay = findViewById<OverlayView>(R.id.ocr_area)
         rescanButton = findViewById(R.id.rescan_button)
         rescanButton.setOnClickListener {
+            // Restart scanning and reset state when the user taps "Rescan"
             scanningActive = true
             stableCount = 0
             lastNameLine = null
+            isProcessing = false
             rescanButton.visibility = View.GONE
             textView.text = ""
         }
@@ -143,13 +145,11 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     }
 
     override fun onImageAvailable(reader: ImageReader) {
-        if (!scanningActive) return
+        // Always acquire and close the latest image to keep the pipeline flowing
+        val image = reader.acquireLatestImage()
+        image?.close()
 
-        val image = reader.acquireLatestImage() ?: return
-        image.close()
-
-        // Skip this frame if a recognition task is already running
-        if (isProcessing) return
+        if (!scanningActive || isProcessing) return
 
         val bitmap = textureView.bitmap ?: return
         val box = overlay.getBoxRect()
