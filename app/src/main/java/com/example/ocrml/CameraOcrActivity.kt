@@ -21,6 +21,7 @@ import android.media.Image
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
+import android.content.res.Configuration
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
@@ -94,6 +95,12 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         val size = chooseOptimalSize(map, viewWidth, viewHeight)
         val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
 
+        if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            textureView.setAspectRatio(size.width, size.height)
+        } else {
+            textureView.setAspectRatio(size.height, size.width)
+        }
+
         imageReader = ImageReader.newInstance(size.width, size.height, ImageFormat.YUV_420_888, 2)
         imageReader.setOnImageAvailableListener(this, backgroundHandler)
 
@@ -142,8 +149,6 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     }
 
     private fun configureTransform(previewSize: Size, sensorOrientation: Int) {
-        if (textureView.width == 0 || textureView.height == 0) return
-
         val rotation = windowManager.defaultDisplay.rotation
         val rotationDegrees = when (rotation) {
             Surface.ROTATION_0 -> 0
@@ -152,22 +157,21 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
             Surface.ROTATION_270 -> 270
             else -> 0
         }
+
         val diff = (sensorOrientation - rotationDegrees + 360) % 360
+        val swapped = diff == 90 || diff == 270
+        if (!swapped) return
 
         val matrix = Matrix()
         val viewRect = RectF(0f, 0f, textureView.width.toFloat(), textureView.height.toFloat())
-        val bufferRect = if (diff == 90 || diff == 270) {
-            RectF(0f, 0f, previewSize.height.toFloat(), previewSize.width.toFloat())
-        } else {
-            RectF(0f, 0f, previewSize.width.toFloat(), previewSize.height.toFloat())
-        }
+        val bufferRect = RectF(0f, 0f, previewSize.height.toFloat(), previewSize.width.toFloat())
         val centerX = viewRect.centerX()
         val centerY = viewRect.centerY()
         bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY())
-        matrix.setRectToRect(bufferRect, viewRect, Matrix.ScaleToFit.FILL)
+        matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL)
         val scale = kotlin.math.max(
-            viewRect.height() / bufferRect.height(),
-            viewRect.width() / bufferRect.width()
+            textureView.height.toFloat() / previewSize.height,
+            textureView.width.toFloat() / previewSize.width
         )
         matrix.postScale(scale, scale, centerX, centerY)
         matrix.postRotate(diff.toFloat(), centerX, centerY)
