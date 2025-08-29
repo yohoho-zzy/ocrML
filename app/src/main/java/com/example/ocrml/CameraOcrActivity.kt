@@ -1,6 +1,7 @@
 package com.example.ocrml
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.ImageFormat
@@ -23,6 +24,8 @@ import android.os.HandlerThread
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
+import java.text.Normalizer
+import android.util.Log
 
 class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListener {
 
@@ -144,6 +147,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
             }, backgroundHandler)
     }
 
+    @SuppressLint("SetTextI18n")
     override fun onImageAvailable(reader: ImageReader) {
         // Always acquire and close the latest image to keep the pipeline flowing
         val image = reader.acquireLatestImage()
@@ -159,20 +163,16 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         isProcessing = true
         recognizer.process(input)
             .addOnSuccessListener { result ->
-                val line = result.text.lines().firstOrNull { it.contains("氏名") }
-                if (line != null) {
-                    textView.text = line
-                    if (line == lastNameLine) {
-                        stableCount++
-                    } else {
-                        lastNameLine = line
-                        stableCount = 1
-                    }
-                    if (stableCount >= 3) {
-                        scanningActive = false
-                        textView.text = "$line\n扫描成功"
-                        rescanButton.visibility = View.VISIBLE
-                    }
+                val infoArr = getInfoArr(result.text)
+                if (infoArr!=null && infoArr[2]!="") {
+                    Log.d("TEXT：", result.text)
+                    Log.d("ARR：", infoArr.toString())
+                }
+                if (infoArr != null && infoArr[4] != "") {
+                    val infoEnd = formatFromLines(infoArr)
+                    scanningActive = false
+                    textView.text = "スキャン成功\n$infoEnd"
+                    rescanButton.visibility = View.VISIBLE
                 } else {
                     textView.text = result.text
                     lastNameLine = null
@@ -181,6 +181,119 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
             }
             .addOnFailureListener { }
             .addOnCompleteListener { isProcessing = false }
+    }
+
+    private fun getInfoArr(raw: String): List<String>? {
+        var text = Normalizer.normalize(raw, Normalizer.Form.NFKC)
+        text = text.replace('\u00A0', ' ')
+            .replace(Regex("[|｜]"), "")
+            .replace("領効", "有効")
+            .replace("效", "効")
+            .replace(Regex("(?<=日)[年入八はﾊ]\\s*で"), "まで")
+            .replace(Regex("[ \\t]+"), " ")
+            .trim()
+
+        val ERA = "(?:昭和|平成|令和)"
+        val NUM = "\\d{1,2}"
+        val PAREN_OPT = "(?:[（(][^）)]*[）)])?"
+        val DATE_WEST = "\\d{4}\\s*年\\s*$PAREN_OPT\\s*$NUM\\s*月\\s*$PAREN_OPT\\s*$NUM\\s*日"
+        val DATE_ERA = "(?:$ERA\\s*$NUM\\s*年\\s*$NUM\\s*月\\s*$NUM\\s*日)"
+        val DATE_ANY = "(?:$DATE_WEST|$DATE_ERA)"
+
+        val reNameBirth = Regex(
+            """氏名\s*(?<name>[\p{InCJKUnifiedIdeographs}々〆ヶぁ-ゖァ-ヺー・\s]{2,40}?)\s*(?<birth>$DATE_ERA)\s*生?""",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.MULTILINE)
+        )
+        val reAddress = Regex(
+            """住[所居]\s*[:：]?\s*(?<addr>[^\r\n]+)""",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.MULTILINE)
+        )
+        val reIssue = Regex(
+            """[交文]付\s*(?<date>$DATE_ERA)(?:[^\r\n]*?(?<code>\d{2,6}))?""",
+            setOf(RegexOption.MULTILINE)
+        )
+        val reValidStrict = Regex(
+            """(?<date>$DATE_ANY)\s*(?:（[^）]*）|\([^)]*\)|[^有\n]){0,12}?[迄まマﾏ][でﾃ]\s*有[効效]""",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.MULTILINE)
+        )
+        val reValidLoose = Regex(
+            """(?<date>$DATE_ANY)\s*(?:（[^）]*）|\([^)]*\)|[^有\n]){0,12}?[でﾃ]\s*有[効效]""",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.MULTILINE)
+        )
+        val reNumber = Regex(
+            """第\s*(?<no>[0-9０-９]{10,12})\s*号""",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.MULTILINE)
+        )
+
+        val m1 = reNameBirth.find(text) ?: return listOf("", "", "", "", "")
+        val name  = m1.groups["name"]!!.value.replace(Regex("\\s+"), " ").trim()
+        val birth = m1.groups["birth"]!!.value.replace(Regex("\\s+"), " ").trim()
+        val line1 = "氏名 $name $birth 生"
+
+        val m2 = reAddress.find(text) ?: return listOf(line1, "", "", "", "")
+        val addr = m2.groups["addr"]!!.value.replace(Regex("\\s+"), " ").trim()
+        val line2 = "住所 $addr"
+
+        val m3 = reIssue.find(text) ?: return listOf(line1, line2, "", "", "")
+        val issueDate = m3.groups["date"]!!.value.replace(Regex("\\s+"), " ").trim()
+        val issueCode = m3.groups["code"]?.value?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
+        val line3 = ("交付 $issueDate " + issueCode).trim()
+
+        val m4 = reValidStrict.find(text) ?: reValidLoose.find(text) ?: return listOf(line1, line2, line3, "", "")
+        val validDate = m4.groups["date"]!!.value.replace(Regex("\\s+"), " ").trim()
+        val line4 = "$validDate まで有効"
+
+        val m5 = reNumber.find(text) ?: return listOf(line1, line2, line3, line4, "")
+        val no = m5.groups["no"]!!.value.replace(Regex("[^0-9]"), "")
+        val line5 = "第 $no 号"
+
+        return listOf(line1, line2, line3, line4, line5)
+    }
+
+    private fun formatFromLines(lines: List<String>): String {
+        fun ns(s: String) = Normalizer.normalize(s, Normalizer.Form.NFKC).replace(Regex("\\s+"), "")
+
+        val l1 = lines.getOrNull(0).orEmpty()
+        val l2 = lines.getOrNull(1).orEmpty()
+        val l3 = lines.getOrNull(2).orEmpty()
+        val l4 = lines.getOrNull(3).orEmpty()
+        val l5 = lines.getOrNull(4).orEmpty()
+
+        val ERA = "(?:昭和|平成|令和)"
+        val NUM = "\\d{1,2}"
+        val PAREN_OPT = "(?:[（(][^）)]*[）)])?"
+        val DATE_WEST = "\\d{4}\\s*年\\s*$PAREN_OPT\\s*$NUM\\s*月\\s*$PAREN_OPT\\s*$NUM\\s*日"
+        val DATE_ERA  = "$ERA\\s*$NUM\\s*年\\s*$NUM\\s*月\\s*$NUM\\s*日"
+        val DATE_ANY  = "(?:$DATE_WEST|$DATE_ERA)"
+
+        val m1 = Regex("""^氏名\s*(?<name>.+?)\s*(?<birth>$DATE_ERA)\s*生?""").find(l1)
+        val name  = m1?.groups?.get("name")?.value?.let(::ns).orEmpty()
+        val birth = m1?.groups?.get("birth")?.value?.let(::ns).orEmpty()
+
+        val m2 = Regex("""^住所\s*(?<addr>.+)$""").find(l2)
+        val addr = m2?.groups?.get("addr")?.value?.let(::ns).orEmpty()
+
+        val mi = Regex("""^交付\s*(?<date>$DATE_ERA)(?:\s*(?<code>[0-9０-９]{5}))?""").find(l3)
+        val issue = mi?.groups?.get("date")?.value?.let(::ns).orEmpty()
+        val code5 = mi?.groups?.get("code")?.value
+            ?.let { Normalizer.normalize(it, Normalizer.Form.NFKC).replace(Regex("\\D"), "") }
+            .orEmpty()
+
+        val mv = Regex("""(?<date>$DATE_ANY)""").find(l4)
+        val valid = mv?.groups?.get("date")?.value?.let(::ns).orEmpty()
+
+        val no = Regex("""([0-9０-９]{10,12})""").find(l5)?.groupValues?.get(1)
+            ?.let { Normalizer.normalize(it, Normalizer.Form.NFKC).replace(Regex("\\D"), "") }
+            .orEmpty()
+
+        return buildString {
+            appendLine("氏　　名：$name")
+            appendLine("住　　所：$addr")
+            appendLine("生年月日：$birth")
+            appendLine("交  付  日：$issue" + if (code5.isNotEmpty()) "（$code5）" else "")
+            appendLine("有効期限：$valid")
+            append("番　　号：$no")
+        }
     }
 
     override fun onDestroy() {
