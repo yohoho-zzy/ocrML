@@ -10,7 +10,7 @@ import android.graphics.RectF
 import android.os.Bundle
 import android.util.Size
 import android.view.Surface
-import com.example.ocrml.AutoFitTextureView
+import android.view.TextureView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -21,14 +21,13 @@ import android.media.Image
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
-import android.content.res.Configuration
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
 
 class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListener {
 
-    private lateinit var textureView: AutoFitTextureView
+    private lateinit var textureView: TextureView
     private lateinit var textView: TextView
     private lateinit var overlay: OverlayView
 
@@ -94,12 +93,6 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         val viewHeight = textureView.height
         val size = chooseOptimalSize(map, viewWidth, viewHeight)
         val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-
-        if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            textureView.setAspectRatio(size.width, size.height)
-        } else {
-            textureView.setAspectRatio(size.height, size.width)
-        }
 
         imageReader = ImageReader.newInstance(size.width, size.height, ImageFormat.YUV_420_888, 2)
         imageReader.setOnImageAvailableListener(this, backgroundHandler)
