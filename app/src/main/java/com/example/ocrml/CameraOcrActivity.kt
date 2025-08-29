@@ -9,6 +9,8 @@ import android.os.Bundle
 import android.util.Size
 import android.view.Surface
 import android.view.TextureView
+import android.view.View
+import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -27,6 +29,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     private lateinit var textureView: TextureView
     private lateinit var textView: TextView
     private lateinit var overlay: OverlayView
+    private lateinit var rescanButton: Button
 
     private lateinit var cameraDevice: CameraDevice
     private lateinit var captureSession: CameraCaptureSession
@@ -42,12 +45,25 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     private val recognizer =
         TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
 
+    private var lastNameLine: String? = null
+    private var stableCount = 0
+    @Volatile
+    private var scanningActive = true
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_camera_ocr)
         textureView = findViewById(R.id.preview)
         textView = findViewById(R.id.result)
         overlay = findViewById<OverlayView>(R.id.ocr_area)
+        rescanButton = findViewById(R.id.rescan_button)
+        rescanButton.setOnClickListener {
+            scanningActive = true
+            stableCount = 0
+            lastNameLine = null
+            rescanButton.visibility = View.GONE
+            textView.text = ""
+        }
 
         val handlerThread = HandlerThread("CameraBackground")
         handlerThread.start()
@@ -127,6 +143,8 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     }
 
     override fun onImageAvailable(reader: ImageReader) {
+        if (!scanningActive) return
+
         val image = reader.acquireLatestImage() ?: return
         image.close()
 
@@ -140,7 +158,27 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
 
         isProcessing = true
         recognizer.process(input)
-            .addOnSuccessListener { textView.text = it.text }
+            .addOnSuccessListener { result ->
+                val line = result.text.lines().firstOrNull { it.contains("氏名") }
+                if (line != null) {
+                    textView.text = line
+                    if (line == lastNameLine) {
+                        stableCount++
+                    } else {
+                        lastNameLine = line
+                        stableCount = 1
+                    }
+                    if (stableCount >= 3) {
+                        scanningActive = false
+                        textView.text = "$line\n扫描成功"
+                        rescanButton.visibility = View.VISIBLE
+                    }
+                } else {
+                    textView.text = result.text
+                    lastNameLine = null
+                    stableCount = 0
+                }
+            }
             .addOnFailureListener { }
             .addOnCompleteListener { isProcessing = false }
     }
