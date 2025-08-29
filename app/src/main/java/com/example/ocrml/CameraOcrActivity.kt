@@ -4,9 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.ImageFormat
-import android.graphics.Matrix
 import android.graphics.Rect
-import android.graphics.RectF
 import android.os.Bundle
 import android.util.Size
 import android.view.Surface
@@ -16,7 +14,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import android.hardware.camera2.*
-import android.hardware.camera2.params.StreamConfigurationMap
 import android.media.Image
 import android.media.ImageReader
 import android.os.Handler
@@ -87,12 +84,8 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         val cameraId = manager.cameraIdList.first()
 
         val characteristics = manager.getCameraCharacteristics(cameraId)
-        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)!!
-
-        val viewWidth = textureView.width
-        val viewHeight = textureView.height
-        val size = chooseOptimalSize(map, viewWidth, viewHeight)
-        val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val size = map!!.getOutputSizes(ImageFormat.YUV_420_888)[0]
 
         imageReader = ImageReader.newInstance(size.width, size.height, ImageFormat.YUV_420_888, 2)
         imageReader.setOnImageAvailableListener(this, backgroundHandler)
@@ -100,7 +93,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         manager.openCamera(cameraId, object : CameraDevice.StateCallback() {
             override fun onOpened(device: CameraDevice) {
                 cameraDevice = device
-                createSession(size, sensorOrientation)
+                createSession(size)
             }
 
             override fun onDisconnected(device: CameraDevice) {
@@ -113,10 +106,9 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         }, backgroundHandler)
     }
 
-    private fun createSession(size: Size, sensorOrientation: Int) {
+    private fun createSession(size: Size) {
         val surfaceTexture = textureView.surfaceTexture ?: return
         surfaceTexture.setDefaultBufferSize(size.width, size.height)
-        configureTransform(size, sensorOrientation)
         val surface = Surface(surfaceTexture)
 
         previewRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
@@ -132,43 +124,6 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
 
                 override fun onConfigureFailed(session: CameraCaptureSession) { }
             }, backgroundHandler)
-    }
-
-    private fun chooseOptimalSize(map: StreamConfigurationMap, viewWidth: Int, viewHeight: Int): Size {
-        val targetRatio = viewWidth.toFloat() / viewHeight
-        return map.getOutputSizes(ImageFormat.YUV_420_888).minByOrNull {
-            kotlin.math.abs(it.width.toFloat() / it.height - targetRatio)
-        } ?: map.getOutputSizes(ImageFormat.YUV_420_888)[0]
-    }
-
-    private fun configureTransform(previewSize: Size, sensorOrientation: Int) {
-        val rotation = windowManager.defaultDisplay.rotation
-        val rotationDegrees = when (rotation) {
-            Surface.ROTATION_0 -> 0
-            Surface.ROTATION_90 -> 90
-            Surface.ROTATION_180 -> 180
-            Surface.ROTATION_270 -> 270
-            else -> 0
-        }
-
-        val diff = (sensorOrientation - rotationDegrees + 360) % 360
-        val swapped = diff == 90 || diff == 270
-        if (!swapped) return
-
-        val matrix = Matrix()
-        val viewRect = RectF(0f, 0f, textureView.width.toFloat(), textureView.height.toFloat())
-        val bufferRect = RectF(0f, 0f, previewSize.height.toFloat(), previewSize.width.toFloat())
-        val centerX = viewRect.centerX()
-        val centerY = viewRect.centerY()
-        bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY())
-        matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL)
-        val scale = kotlin.math.max(
-            textureView.height.toFloat() / previewSize.height,
-            textureView.width.toFloat() / previewSize.width
-        )
-        matrix.postScale(scale, scale, centerX, centerY)
-        matrix.postRotate(diff.toFloat(), centerX, centerY)
-        textureView.setTransform(matrix)
     }
 
     override fun onImageAvailable(reader: ImageReader) {
