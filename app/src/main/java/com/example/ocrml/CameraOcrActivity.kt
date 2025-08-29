@@ -170,8 +170,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
             viewRect.width() / bufferRect.width()
         )
         matrix.postScale(scale, scale, centerX, centerY)
-        // Rotate in the opposite direction to match device orientation
-        matrix.postRotate(-diff.toFloat(), centerX, centerY)
+        matrix.postRotate(diff.toFloat(), centerX, centerY)
         textureView.setTransform(matrix)
     }
 
