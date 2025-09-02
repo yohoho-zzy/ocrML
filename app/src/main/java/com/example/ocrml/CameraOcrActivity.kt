@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.ImageFormat
+import android.graphics.SurfaceTexture
 import android.os.Bundle
 import android.util.Size
 import android.view.Surface
@@ -41,6 +42,10 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     private lateinit var previewRequestBuilder: CaptureRequest.Builder
     private lateinit var backgroundHandler: Handler
 
+    // 変形防止のためのプレビュー設定
+    private lateinit var previewSize: Size
+    private var sensorOrientation: Int = 0
+
     @Volatile private var isProcessing = false
     @Volatile private var scanningActive = true
 
@@ -48,7 +53,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     private val recognizer =
         TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
 
-    // 各グループ（氏名・住所・交付日・有効期限・番号）の履歴（最大7件）
+    // 各グループ（氏名・住所・交付日・有効期限・番号）の履歴（最大5件）
     private val history = Array(5) { mutableListOf<String>() }
     private val HISTORY_LIMIT = 5
 
@@ -63,7 +68,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         overlay = findViewById(R.id.ocr_area)
         rescanButton = findViewById(R.id.rescan_button)
 
-        // 再スキャンボタン
+        // 再スキャンボタン（履歴と表示をリセット）
         rescanButton.setOnClickListener {
             scanningActive = true
             isProcessing = false
@@ -77,6 +82,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         backgroundHandler = Handler(handlerThread.looper)
 
         if (allPermissionsGranted()) {
+            // TextureView のレイアウト完了後にカメラを開く
             textureView.post { openCamera() }
         } else {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 0)
@@ -103,24 +109,129 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         }
     }
 
-    // カメラを開く
+    // ===== アスペクト比を維持しつつプレビュー用サイズを選択（TextureView に最適化） =====
+    private fun chooseOptimalPreviewSize(
+        choices: Array<Size>,
+        viewW: Int,
+        viewH: Int,
+        swapped: Boolean
+    ): Size {
+        val targetW = if (swapped) viewH else viewW
+        val targetH = if (swapped) viewW else viewH
+        val targetRatio = targetW.toFloat() / targetH
+
+        return choices.minByOrNull { s ->
+            val ratio = s.width.toFloat() / s.height
+            val ratioDiff = kotlin.math.abs(ratio - targetRatio)
+            // 目標より小さいサイズには軽いペナルティ
+            val tooSmall = if (s.width < targetW || s.height < targetH) 0.2f else 0f
+            ratioDiff + tooSmall
+        } ?: choices.first()
+    }
+
+    // ===== YUV サイズはプレビューと同一のアスペクト比に合わせる（後段処理のズレ防止） =====
+    private fun chooseYuvSizeWithSameAspect(choices: Array<Size>, ref: Size): Size {
+        val refRatio = ref.width.toFloat() / ref.height
+        return choices.minByOrNull { s ->
+            val ratio = s.width.toFloat() / s.height
+            val ratioDiff = kotlin.math.abs(ratio - refRatio)
+            // 過大サイズを避けつつ比率優先
+            ratioDiff * 10f + kotlin.math.abs(s.width - ref.width) / 10000f
+        } ?: choices.first()
+    }
+
+    // ===== TextureView への等比スケーリング + 回転（歪みなし・中央トリミング）=====
+    // ★重要：センサー角度は使わず、Display の回転だけで行列を作る（Google の Camera2Basic と同流儀）
+    private fun configureTransform(viewW: Int, viewH: Int) {
+        if (!::previewSize.isInitialized) return
+
+        val rotation = windowManager.defaultDisplay.rotation
+        val matrix = android.graphics.Matrix()
+        val viewRect = android.graphics.RectF(0f, 0f, viewW.toFloat(), viewH.toFloat())
+        val centerX = viewRect.centerX()
+        val centerY = viewRect.centerY()
+
+        when (rotation) {
+            // 90度 or 270度の時はバッファの幅高が入れ替わる前提で合わせる
+            Surface.ROTATION_90, Surface.ROTATION_270 -> {
+                // バッファは横長前提：幅=previewSize.height, 高=previewSize.width として矩形を作る
+                val bufferRect = android.graphics.RectF(
+                    0f, 0f,
+                    previewSize.height.toFloat(),
+                    previewSize.width.toFloat()
+                )
+                // ビュー中心に合わせてバッファ矩形をオフセット
+                bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY())
+
+                // 等比でビュー全面を充填（中央トリミング、伸縮なし）
+                matrix.setRectToRect(viewRect, bufferRect, android.graphics.Matrix.ScaleToFit.FILL)
+
+                // 追加スケール（Camera2Basic と同じ）：これで上下左右の欠けが最小化される
+                val scale = kotlin.math.max(
+                    viewH.toFloat() / previewSize.height.toFloat(),
+                    viewW.toFloat() / previewSize.width.toFloat()
+                )
+                matrix.postScale(scale, scale, centerX, centerY)
+
+                // 回転：90*(rotation-2) → ROTATION_90:-90°, ROTATION_270:+90°
+                matrix.postRotate(90f * (rotation - 2), centerX, centerY)
+            }
+
+            // 180度の時だけ 180 回転
+            Surface.ROTATION_180 -> {
+                matrix.postRotate(180f, centerX, centerY)
+            }
+
+            // 0度（縦持ち標準）の時はそのまま。追加の回転は不要
+            else -> {
+                // 何もしない（歪み防止のための行列適用は不要）
+            }
+        }
+
+        textureView.setTransform(matrix)
+    }
+
+
+    // カメラを開く（プレビュー比率の整合をとった上で ImageReader を構成）
     @RequiresApi(Build.VERSION_CODES.M)
     @RequiresPermission(Manifest.permission.CAMERA)
     private fun openCamera() {
         val manager = getSystemService(CameraManager::class.java)
         val cameraId = manager.cameraIdList.first()
 
-        val map = manager.getCameraCharacteristics(cameraId)
-            .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-        val size = map!!.getOutputSizes(ImageFormat.YUV_420_888)[0]
+        val chars = manager.getCameraCharacteristics(cameraId)
+        val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)!!
+        sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
 
-        imageReader = ImageReader.newInstance(size.width, size.height, ImageFormat.YUV_420_888, 2)
+        val rotation = windowManager.defaultDisplay.rotation
+        val swapped = when (rotation) {
+            Surface.ROTATION_0, Surface.ROTATION_180 -> (sensorOrientation == 90 || sensorOrientation == 270)
+            Surface.ROTATION_90, Surface.ROTATION_270 -> (sensorOrientation == 0 || sensorOrientation == 180)
+            else -> false
+        }
+
+        // TextureView の実寸から最適なプレビューサイズを選ぶ
+        val viewW = textureView.width
+        val viewH = textureView.height
+        val previewChoices = map.getOutputSizes(SurfaceTexture::class.java)
+        previewSize = chooseOptimalPreviewSize(previewChoices, viewW, viewH, swapped)
+
+        // YUV はプレビューと同じアスペクト比に合わせる
+        val yuvChoices = map.getOutputSizes(ImageFormat.YUV_420_888)
+        val yuvSize = chooseYuvSizeWithSameAspect(yuvChoices, previewSize)
+
+        // プレビューのバッファサイズを設定し、非伸長の変換を適用
+        val surfaceTexture = textureView.surfaceTexture!!
+        surfaceTexture.setDefaultBufferSize(previewSize.width, previewSize.height)
+        configureTransform(viewW, viewH)
+
+        imageReader = ImageReader.newInstance(yuvSize.width, yuvSize.height, ImageFormat.YUV_420_888, 2)
         imageReader.setOnImageAvailableListener(this, backgroundHandler)
 
         manager.openCamera(cameraId, object : CameraDevice.StateCallback() {
             override fun onOpened(device: CameraDevice) {
                 cameraDevice = device
-                createSession(size)
+                createSession(previewSize)
             }
             override fun onDisconnected(device: CameraDevice) { device.close() }
             override fun onError(device: CameraDevice, error: Int) { device.close() }
@@ -141,6 +252,9 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
             object : CameraCaptureSession.StateCallback() {
                 override fun onConfigured(session: CameraCaptureSession) {
                     captureSession = session
+                    // ここで再度変換を適用（状態変化時の安全策）
+                    configureTransform(textureView.width, textureView.height)
+
                     captureSession.setRepeatingRequest(previewRequestBuilder.build(), null, backgroundHandler)
                 }
                 override fun onConfigureFailed(session: CameraCaptureSession) {}
@@ -155,6 +269,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
 
         if (!scanningActive || isProcessing) return
 
+        // 画面に表示された（変換後の）プレビューから矩形領域を切り出す
         val bitmap = textureView.bitmap ?: return
         val box = overlay.getBoxRect()
         val cropped = Bitmap.createBitmap(bitmap, box.left, box.top, box.width(), box.height())
@@ -167,7 +282,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
                 textView.text = result.text
 
                 val infoArr = getInfoArrRaw(result.text)
-                // 任意のフィールドがあれば、そのフィールドだけ履歴に追加
+                // 抽出できた項目のみ履歴に追加（先入れ先出し）
                 for (i in infoArr.indices) {
                     if (infoArr[i].isNotEmpty()) {
                         val list = history[i]
@@ -177,18 +292,18 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
                     }
                 }
 
-                // 5項目すべて7件に達したら最終判定
+                // 全5項目が所定回数たまったら多数決で最終決定
                 if (history.all { it.size >= HISTORY_LIMIT }) {
                     val formattedAll = mutableListOf<List<String>>()
 
-                    // 7回分の候補を整形
+                    // 各回の候補を整形して保存
                     for (i in 0 until HISTORY_LIMIT) {
-                        val candidate = history.map { it[i] } // 各グループから i 番目を取る
-                        val formatted = formatFromLines(candidate) // 整形済みの6フィールド
+                        val candidate = history.map { it[i] } // 各グループから i 番目を取得
+                        val formatted = formatFromLines(candidate) // 整形後の6フィールド
                         formattedAll.add(formatted)
                     }
 
-                    // 縦に集計して最頻値を選ぶ
+                    // 列方向に集計して最頻値を採用
                     val bestFields = (0 until formattedAll[0].size).map { col ->
                         val columnValues = formattedAll.map { it[col] }
                         selectBest(columnValues)
@@ -285,7 +400,6 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         // 有効期限（「まで有効/まで領効/まで效」を除去、()内の和暦も保持）
         val valid = run {
             val s = l4.replace(Regex("""まで[有領]?[効效]"""), "")
-            // 文字自体は preClean 後なのでそのまま返す
             s
         }
         // 番号（数字のみ）
@@ -297,7 +411,8 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     }
 
     // 最頻値を返す
-    private fun selectBest(list: List<String>): String = list.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: ""
+    private fun selectBest(list: List<String>): String =
+        list.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: ""
 
     // デバッグ用：全履歴を文字列化
     private fun debugHistory(): String {
