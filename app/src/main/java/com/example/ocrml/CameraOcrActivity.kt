@@ -35,6 +35,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     private lateinit var textView: TextView
     private lateinit var overlay: OverlayView
     private lateinit var rescanButton: Button
+    private lateinit var versionText: TextView
 
     private lateinit var cameraDevice: CameraDevice
     private lateinit var captureSession: CameraCaptureSession
@@ -57,6 +58,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
     private val history = Array(5) { mutableListOf<String>() }
     private val HISTORY_LIMIT = 5
 
+    @SuppressLint("SetTextI18n")
     @RequiresApi(Build.VERSION_CODES.M)
     @RequiresPermission(Manifest.permission.CAMERA)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -67,6 +69,8 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         textView = findViewById(R.id.result)
         overlay = findViewById(R.id.ocr_area)
         rescanButton = findViewById(R.id.rescan_button)
+        versionText = findViewById(R.id.version_text)
+        versionText.text = "v${BuildConfig.VERSION_NAME}"
 
         // 再スキャンボタン（履歴と表示をリセット）
         rescanButton.setOnClickListener {
@@ -279,7 +283,17 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         recognizer.process(input)
             .addOnSuccessListener { result ->
                 // OCR結果をリアルタイム表示
-                textView.text = result.text
+                // textView.text = result.text
+
+                // OCR結果をリアルタイム表示 + 履歴件数（ラベル付き）
+                val groupNames = arrayOf("氏名/生年月日", "住所", "交付日", "有効期限", "番号")
+                val progressLines = buildString {
+                    appendLine("履歴進捗（各グループ 件数/目標$HISTORY_LIMIT）")
+                    for (i in history.indices) {
+                        appendLine("${groupNames[i]}：${history[i].size}/$HISTORY_LIMIT")
+                    }
+                }
+                textView.text = "$progressLines\n---\n${result.text}"
 
                 val infoArr = getInfoArrRaw(result.text)
                 // 抽出できた項目のみ履歴に追加（先入れ先出し）
@@ -288,7 +302,6 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
                         val list = history[i]
                         if (list.size >= HISTORY_LIMIT) list.removeAt(0)
                         list.add(infoArr[i])
-                        Log.d("OCR_HISTORY", "グループ${i+1}: ${list.size}件 -> ${infoArr[i]}")
                     }
                 }
 
@@ -362,7 +375,6 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         fun preClean(raw: String): String {
             var t = Normalizer.normalize(raw, Normalizer.Form.NFKC)
                 .replace(Regex("[ー−―－]"), "-")
-            t = t.replace(Regex("""月\s+(\d)日""")) { m -> "月1${m.groupValues[1]}日" }
             t = t.replace(Regex("\\s+"), "")
             return t
         }
