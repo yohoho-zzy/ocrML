@@ -360,29 +360,13 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         val DATE_ANY = "(?:$DATE_WEST|$DATE_ERA)"
         val reNameBirth = Regex("""氏名\s*.+?$DATE_ERA\s*生?""")
         val reNameOnly  = Regex("""(?m)^.*氏名.*$""")
-        val reBirthOnly = Regex("""(?m)^.*$DATE_ERA\s*生\s*$""")
+        val reBirthOnly = Regex("""(?m)^.*$DATE_ERA\s*生[^\r\n]*$""")
         val reAddress   = Regex("""住[所居]\s*[:：]?[^\r\n]+""")
         val reIssue     = Regex("""[交文]付\s*$DATE_ERA.*""")
         val reValid     = Regex("""$DATE_ANY.*?[迄まマﾏ][でﾃ]\s*有[効效]""")
         val reNumber    = Regex("""第\s*[0-9０-９]{10,12}\s*号""")
         val combined = reNameBirth.find(text)?.value ?: ""
         var nameOnly = reNameOnly.find(text)?.value
-        if (nameOnly != null) {
-            val lines = text.replace("\r\n", "\n").split('\n')
-            val idx = lines.indexOfFirst { it.contains("氏名") }
-            if (idx >= 0) {
-                val cur = lines[idx].trim()
-                val after = cur.replace(Regex("^.*?氏名\\s*[:：]?"), "").trim()
-                val hasKanjiAfter = Regex("[一-龥々〆ヶヵ]").containsMatchIn(after)
-                if (!hasKanjiAfter && idx + 1 < lines.size) {
-                    val next = lines[idx + 1].trim()
-                    val allKanji = Regex("^[一-龥々〆ヶヵ\\s]+$").matches(next)
-                    if (allKanji && next.isNotEmpty()) {
-                        nameOnly = "$cur $next"
-                    }
-                }
-            }
-        }
         val birthOnly = reBirthOnly.find(text)?.value
         val line1 = if (combined.isNotEmpty()) combined
         else if (nameOnly != null && birthOnly != null) "${nameOnly.trim()} ${birthOnly.trim()}"
