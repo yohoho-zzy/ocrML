@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.*
 import android.util.AttributeSet
 import android.view.View
+import kotlin.math.min
 
 class OverlayView @JvmOverloads constructor(
     context: Context,
@@ -28,16 +29,31 @@ class OverlayView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        val boxWidth = 300f * resources.displayMetrics.density
-        val boxHeight = 180f * resources.displayMetrics.density
-        val expansion = 30f * resources.displayMetrics.density
-        val offsetY = 120f * resources.displayMetrics.density
-        val left = ((w - boxWidth) / 2f - expansion / 2f).toInt()
-        val top = (((h - boxHeight) / 2f) - offsetY - expansion / 2f)
-            .toInt().coerceAtLeast(0)
-        val right = (left + boxWidth + expansion).toInt()
-        val bottom = (top + boxHeight + expansion).toInt()
-        boxRect.set(left, top, right, bottom)
+        val density = resources.displayMetrics.density
+        val expansion = 20f * density
+        val isLandscape = w > h
+
+        if (isLandscape) {
+            val desiredWidth = w * 0.6f
+            val maxWidthByHeight = (h - expansion) * 5f / 3f
+            val boxWidth = min(desiredWidth, maxWidthByHeight)
+            val boxHeight = boxWidth * 3f / 5f
+            val left = ((w - boxWidth) / 2f - expansion / 2f).toInt().coerceAtLeast(0)
+            val top = ((h - boxHeight) / 2f - expansion / 2f).toInt().coerceAtLeast(0)
+            val right = (left + boxWidth + expansion).toInt().coerceAtMost(w)
+            val bottom = (top + boxHeight + expansion).toInt().coerceAtMost(h)
+            boxRect.set(left, top, right, bottom)
+        } else {
+            val boxWidth = 300f * density
+            val boxHeight = 180f * density
+            val offsetY = 120f * density
+            val left = ((w - boxWidth) / 2f - expansion / 2f).toInt().coerceAtLeast(0)
+            val top = (((h - boxHeight) / 2f) - offsetY - expansion / 2f)
+                .toInt().coerceAtLeast(0)
+            val right = (left + boxWidth + expansion).toInt().coerceAtMost(w)
+            val bottom = (top + boxHeight + expansion).toInt().coerceAtMost(h)
+            boxRect.set(left, top, right, bottom)
+        }
     }
 
     override fun onDraw(canvas: Canvas) {

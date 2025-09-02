@@ -55,7 +55,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
 
     // 各グループ（氏名・住所・交付日・有効期限・番号）の履歴（最大5件）
-    private val history = Array(5) { mutableListOf<String>() }
+    private val history = Array(6) { mutableListOf<String>() }
     private val HISTORY_LIMIT = 5
 
     @SuppressLint("SetTextI18n")
@@ -276,7 +276,12 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         // 画面に表示された（変換後の）プレビューから矩形領域を切り出す
         val bitmap = textureView.bitmap ?: return
         val box = overlay.getBoxRect()
-        val cropped = Bitmap.createBitmap(bitmap, box.left, box.top, box.width(), box.height())
+        val left = box.left.coerceAtLeast(0)
+        val top = box.top.coerceAtLeast(0)
+        val right = box.right.coerceAtMost(bitmap.width)
+        val bottom = box.bottom.coerceAtMost(bitmap.height)
+        if (right <= left || bottom <= top) return
+        val cropped = Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
         val input = InputImage.fromBitmap(cropped, 0)
 
         isProcessing = true
@@ -286,7 +291,7 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
                 // textView.text = result.text
 
                 // OCR結果をリアルタイム表示 + 履歴件数（ラベル付き）
-                val groupNames = arrayOf("氏名/生年月日", "住所", "交付日", "有効期限", "番号")
+                val groupNames = arrayOf("氏名", "生年月日", "住所", "交付日", "有効期限", "番号")
                 val progressLines = buildString {
                     appendLine("履歴進捗（各グループ 件数/目標$HISTORY_LIMIT）")
                     for (i in history.indices) {
@@ -347,27 +352,46 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
             .replace('\u00A0', ' ')
             .replace(Regex("[|｜]"), "")
             .trim()
-
         val ERA = "(?:昭和|平成|令和)"
         val NUM = "\\d{1,2}"
         val PAREN_OPT = "(?:[（(][^）)]*[）)])?"
         val DATE_WEST = "\\d{4}\\s*年\\s*$PAREN_OPT\\s*$NUM\\s*月\\s*$PAREN_OPT\\s*$NUM\\s*日"
         val DATE_ERA = "(?:$ERA\\s*$NUM\\s*年\\s*$NUM\\s*月\\s*$NUM\\s*日)"
         val DATE_ANY = "(?:$DATE_WEST|$DATE_ERA)"
-
         val reNameBirth = Regex("""氏名\s*.+?$DATE_ERA\s*生?""")
+        val reNameOnly  = Regex("""(?m)^.*氏名.*$""")
+        val reBirthOnly = Regex("""(?m)^.*$DATE_ERA\s*生\s*$""")
         val reAddress   = Regex("""住[所居]\s*[:：]?[^\r\n]+""")
         val reIssue     = Regex("""[交文]付\s*$DATE_ERA.*""")
         val reValid     = Regex("""$DATE_ANY.*?[迄まマﾏ][でﾃ]\s*有[効效]""")
         val reNumber    = Regex("""第\s*[0-9０-９]{10,12}\s*号""")
-
-        val line1 = reNameBirth.find(text)?.value ?: ""
+        val combined = reNameBirth.find(text)?.value ?: ""
+        var nameOnly = reNameOnly.find(text)?.value
+        if (nameOnly != null) {
+            val lines = text.replace("\r\n", "\n").split('\n')
+            val idx = lines.indexOfFirst { it.contains("氏名") }
+            if (idx >= 0) {
+                val cur = lines[idx].trim()
+                val after = cur.replace(Regex("^.*?氏名\\s*[:：]?"), "").trim()
+                val hasKanjiAfter = Regex("[一-龥々〆ヶヵ]").containsMatchIn(after)
+                if (!hasKanjiAfter && idx + 1 < lines.size) {
+                    val next = lines[idx + 1].trim()
+                    val allKanji = Regex("^[一-龥々〆ヶヵ\\s]+$").matches(next)
+                    if (allKanji && next.isNotEmpty()) {
+                        nameOnly = "$cur $next"
+                    }
+                }
+            }
+        }
+        val birthOnly = reBirthOnly.find(text)?.value
+        val line1 = if (combined.isNotEmpty()) combined
+        else if (nameOnly != null && birthOnly != null) "${nameOnly.trim()} ${birthOnly.trim()}"
+        else ""
         val line2 = reAddress.find(text)?.value ?: ""
         val line3 = reIssue.find(text)?.value ?: ""
         val line4 = reValid.find(text)?.value ?: ""
         val line5 = reNumber.find(text)?.value ?: ""
-
-        return listOf(line1, line2, line3, line4, line5)
+        return listOf(line1, line1, line2, line3, line4, line5)
     }
 
     // ===== 最終出力整形（完全版） =====
@@ -380,10 +404,10 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         }
 
         val l1 = preClean(lines.getOrNull(0).orEmpty())
-        val l2 = preClean(lines.getOrNull(1).orEmpty())
-        val l3 = preClean(lines.getOrNull(2).orEmpty())
-        val l4 = preClean(lines.getOrNull(3).orEmpty())
-        val l5 = preClean(lines.getOrNull(4).orEmpty())
+        val l2 = preClean(lines.getOrNull(2).orEmpty())
+        val l3 = preClean(lines.getOrNull(3).orEmpty())
+        val l4 = preClean(lines.getOrNull(4).orEmpty())
+        val l5 = preClean(lines.getOrNull(5).orEmpty())
 
         val DATE_ANY = Regex("""(?:\d{4}年(?:\([^)]*\))?\d{1,2}月\d{1,2}日|(?:昭和|平成|令和)\d{1,2}年\d{1,2}月\d{1,2}日)""")
         // 氏名 + 生年月日
