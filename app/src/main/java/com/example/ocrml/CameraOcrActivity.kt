@@ -413,14 +413,14 @@ class CameraOcrActivity : AppCompatActivity(), ImageReader.OnImageAvailableListe
         // 氏名 + 生年月日
         var name = ""
         var birth = ""
-        if (l1.startsWith("氏名")) {
-            val body = l1.removePrefix("氏名")
+        if (l1.contains("氏名")) {
+            val body = l1.replaceFirst(Regex(""".*?氏名\s*[:：]?"""), "").trim()
             val dm = DATE_ANY.find(body)
             if (dm != null) {
                 name = body.substring(0, dm.range.first)
                     .replace(Regex("(昭和|平成|令和).*$"), "")
                     .trim()
-                birth = dm.value.replace("生", "")
+                birth = dm.value.replace("生", "").trim()
             }
         }
         // 住所
